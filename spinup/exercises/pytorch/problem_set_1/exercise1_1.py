@@ -1,5 +1,5 @@
-import torch
 import numpy as np
+import torch
 
 """
 
@@ -12,6 +12,7 @@ distributions, and returns a Tensor containing the log
 likelihoods of those samples.
 
 """
+
 
 def gaussian_likelihood(x, mu, log_std):
     """
@@ -31,12 +32,14 @@ def gaussian_likelihood(x, mu, log_std):
     return torch.zeros(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     """
     Run this file to verify your solution.
     """
-    from spinup.exercises.pytorch.problem_set_1_solutions import exercise1_1_soln
     from spinup.exercises.common import print_result
+    from spinup.exercises.pytorch.problem_set_1_solutions import (
+        exercise1_1_soln,
+    )
 
     batch_size = 32
     dim = 10
@@ -46,7 +49,9 @@ if __name__ == '__main__':
     log_std = torch.rand(dim)
 
     your_gaussian_likelihood = gaussian_likelihood(x, mu, log_std)
-    true_gaussian_likelihood = exercise1_1_soln.gaussian_likelihood(x, mu, log_std)
+    true_gaussian_likelihood = exercise1_1_soln.gaussian_likelihood(
+        x, mu, log_std
+    )
 
     your_result = your_gaussian_likelihood.detach().numpy()
     true_result = true_gaussian_likelihood.detach().numpy()

@@ -1,5 +1,6 @@
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
+
 from spinup.exercises.tf1.problem_set_1 import exercise1_1
 
 """
@@ -91,13 +92,15 @@ if __name__ == '__main__':
     Run this file to verify your solution.
     """
 
-    from spinup import ppo_tf1 as ppo
-    from spinup.exercises.common import print_result
-    import gym
     import os
+    import time
+
+    import gym
     import pandas as pd
     import psutil
-    import time
+
+    from spinup import ppo_tf1 as ppo
+    from spinup.exercises.common import print_result
 
     logdir = "/tmp/experiments/%i"%int(time.time())
     ppo(env_fn = lambda : gym.make('InvertedPendulum-v2'),

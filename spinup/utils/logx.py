@@ -5,15 +5,20 @@ Some simple logging functionality, inspired by rllab's logging.
 Logs to a tab-separated-values file (path/to/output_directory/progress.txt)
 
 """
+import atexit
 import json
-import joblib
+import os
+import os.path as osp
 import shutil
+import time
+import warnings
+
+import joblib
 import numpy as np
 import tensorflow as tf
 import torch
-import os.path as osp, time, atexit, os
-import warnings
-from spinup.utils.mpi_tools import proc_id, mpi_statistics_scalar
+
+from spinup.utils.mpi_tools import mpi_statistics_scalar, proc_id
 from spinup.utils.serialization_utils import convert_json
 
 color2num = dict(

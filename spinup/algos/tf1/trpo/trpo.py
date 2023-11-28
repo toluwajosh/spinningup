@@ -1,14 +1,22 @@
+import time
+
+import gym
 import numpy as np
 import tensorflow as tf
-import gym
-import time
+
 import spinup.algos.tf1.trpo.core as core
 from spinup.utils.logx import EpochLogger
 from spinup.utils.mpi_tf import MpiAdamOptimizer, sync_all_params
-from spinup.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
-
+from spinup.utils.mpi_tools import (
+    mpi_avg,
+    mpi_fork,
+    mpi_statistics_scalar,
+    num_procs,
+    proc_id,
+)
 
 EPS = 1e-8
+
 
 class GAEBuffer:
     """
@@ -17,15 +25,24 @@ class GAEBuffer:
     for calculating the advantages of state-action pairs.
     """
 
-    def __init__(self, obs_dim, act_dim, size, info_shapes, gamma=0.99, lam=0.95):
-        self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
-        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32)
+    def __init__(
+        self, obs_dim, act_dim, size, info_shapes, gamma=0.99, lam=0.95
+    ):
+        self.obs_buf = np.zeros(
+            core.combined_shape(size, obs_dim), dtype=np.float32
+        )
+        self.act_buf = np.zeros(
+            core.combined_shape(size, act_dim), dtype=np.float32
+        )
         self.adv_buf = np.zeros(size, dtype=np.float32)
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.ret_buf = np.zeros(size, dtype=np.float32)
         self.val_buf = np.zeros(size, dtype=np.float32)
         self.logp_buf = np.zeros(size, dtype=np.float32)
-        self.info_bufs = {k: np.zeros([size] + list(v), dtype=np.float32) for k,v in info_shapes.items()}
+        self.info_bufs = {
+            k: np.zeros([size] + list(v), dtype=np.float32)
+            for k, v in info_shapes.items()
+        }
         self.sorted_info_keys = core.keys_as_sorted_list(self.info_bufs)
         self.gamma, self.lam = gamma, lam
         self.ptr, self.path_start_idx, self.max_size = 0, 0, size
@@ -34,7 +51,9 @@ class GAEBuffer:
         """
         Append one timestep of agent-environment interaction to the buffer.
         """
-        assert self.ptr < self.max_size     # buffer has to have room so you can store
+        assert (
+            self.ptr < self.max_size
+        )  # buffer has to have room so you can store
         self.obs_buf[self.ptr] = obs
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
@@ -63,14 +82,16 @@ class GAEBuffer:
         path_slice = slice(self.path_start_idx, self.ptr)
         rews = np.append(self.rew_buf[path_slice], last_val)
         vals = np.append(self.val_buf[path_slice], last_val)
-        
+
         # the next two lines implement GAE-Lambda advantage calculation
         deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
-        self.adv_buf[path_slice] = core.discount_cumsum(deltas, self.gamma * self.lam)
-        
+        self.adv_buf[path_slice] = core.discount_cumsum(
+            deltas, self.gamma * self.lam
+        )
+
         # the next line computes rewards-to-go, to be targets for the value function
         self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)[:-1]
-        
+
         self.path_start_idx = self.ptr
 
     def get(self):
@@ -79,23 +100,45 @@ class GAEBuffer:
         the buffer, with advantages appropriately normalized (shifted to have
         mean zero and std one). Also, resets some pointers in the buffer.
         """
-        assert self.ptr == self.max_size    # buffer has to be full before you can get
+        assert (
+            self.ptr == self.max_size
+        )  # buffer has to be full before you can get
         self.ptr, self.path_start_idx = 0, 0
         # the next two lines implement the advantage normalization trick
         adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
-        return [self.obs_buf, self.act_buf, self.adv_buf, self.ret_buf, 
-                self.logp_buf] + core.values_as_sorted_list(self.info_bufs)
+        return [
+            self.obs_buf,
+            self.act_buf,
+            self.adv_buf,
+            self.ret_buf,
+            self.logp_buf,
+        ] + core.values_as_sorted_list(self.info_bufs)
 
 
-
-def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0, 
-         steps_per_epoch=4000, epochs=50, gamma=0.99, delta=0.01, vf_lr=1e-3,
-         train_v_iters=80, damping_coeff=0.1, cg_iters=10, backtrack_iters=10, 
-         backtrack_coeff=0.8, lam=0.97, max_ep_len=1000, logger_kwargs=dict(), 
-         save_freq=10, algo='trpo'):
+def trpo(
+    env_fn,
+    actor_critic=core.mlp_actor_critic,
+    ac_kwargs=dict(),
+    seed=0,
+    steps_per_epoch=4000,
+    epochs=50,
+    gamma=0.99,
+    delta=0.01,
+    vf_lr=1e-3,
+    train_v_iters=80,
+    damping_coeff=0.1,
+    cg_iters=10,
+    backtrack_iters=10,
+    backtrack_coeff=0.8,
+    lam=0.97,
+    max_ep_len=1000,
+    logger_kwargs=dict(),
+    save_freq=10,
+    algo="trpo",
+):
     """
-    Trust Region Policy Optimization 
+    Trust Region Policy Optimization
 
     (with support for Natural Policy Gradient)
 
@@ -103,14 +146,14 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
         env_fn : A function which creates a copy of the environment.
             The environment must satisfy the OpenAI Gym API.
 
-        actor_critic: A function which takes in placeholder symbols 
-            for state, ``x_ph``, and action, ``a_ph``, and returns the main 
+        actor_critic: A function which takes in placeholder symbols
+            for state, ``x_ph``, and action, ``a_ph``, and returns the main
             outputs from the agent's Tensorflow computation graph:
 
             ============  ================  ========================================
             Symbol        Shape             Description
             ============  ================  ========================================
-            ``pi``        (batch, act_dim)  | Samples actions from policy given 
+            ``pi``        (batch, act_dim)  | Samples actions from policy given
                                             | states.
             ``logp``      (batch,)          | Gives log probability, according to
                                             | the policy, of taking actions ``a_ph``
@@ -119,7 +162,7 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
                                             | the policy, of the action sampled by
                                             | ``pi``.
             ``info``      N/A               | A dict of any intermediate quantities
-                                            | (from calculating the policy or log 
+                                            | (from calculating the policy or log
                                             | probabilities) which are needed for
                                             | analytically computing KL divergence.
                                             | (eg sufficient statistics of the
@@ -128,21 +171,21 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
                                             | of the entries in ``info``.
             ``d_kl``      ()                | A symbol for computing the mean KL
                                             | divergence between the current policy
-                                            | (``pi``) and the old policy (as 
-                                            | specified by the inputs to 
-                                            | ``info_phs``) over the batch of 
+                                            | (``pi``) and the old policy (as
+                                            | specified by the inputs to
+                                            | ``info_phs``) over the batch of
                                             | states given in ``x_ph``.
             ``v``         (batch,)          | Gives the value estimate for states
-                                            | in ``x_ph``. (Critical: make sure 
+                                            | in ``x_ph``. (Critical: make sure
                                             | to flatten this!)
             ============  ================  ========================================
 
-        ac_kwargs (dict): Any kwargs appropriate for the actor_critic 
+        ac_kwargs (dict): Any kwargs appropriate for the actor_critic
             function you provided to TRPO.
 
         seed (int): Seed for random number generators.
 
-        steps_per_epoch (int): Number of steps of interaction (state-action pairs) 
+        steps_per_epoch (int): Number of steps of interaction (state-action pairs)
             for the agent and the environment in each epoch.
 
         epochs (int): Number of epochs of interaction (equivalent to
@@ -150,31 +193,31 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
 
         gamma (float): Discount factor. (Always between 0 and 1.)
 
-        delta (float): KL-divergence limit for TRPO / NPG update. 
+        delta (float): KL-divergence limit for TRPO / NPG update.
             (Should be small for stability. Values like 0.01, 0.05.)
 
         vf_lr (float): Learning rate for value function optimizer.
 
-        train_v_iters (int): Number of gradient descent steps to take on 
+        train_v_iters (int): Number of gradient descent steps to take on
             value function per epoch.
 
-        damping_coeff (float): Artifact for numerical stability, should be 
+        damping_coeff (float): Artifact for numerical stability, should be
             smallish. Adjusts Hessian-vector product calculation:
-            
+
             .. math:: Hv \\rightarrow (\\alpha I + H)v
 
-            where :math:`\\alpha` is the damping coefficient. 
+            where :math:`\\alpha` is the damping coefficient.
             Probably don't play with this hyperparameter.
 
-        cg_iters (int): Number of iterations of conjugate gradient to perform. 
+        cg_iters (int): Number of iterations of conjugate gradient to perform.
             Increasing this will lead to a more accurate approximation
             to :math:`H^{-1} g`, and possibly slightly-improved performance,
-            but at the cost of slowing things down. 
+            but at the cost of slowing things down.
 
             Also probably don't play with this hyperparameter.
 
-        backtrack_iters (int): Maximum number of steps allowed in the 
-            backtracking line search. Since the line search usually doesn't 
+        backtrack_iters (int): Maximum number of steps allowed in the
+            backtracking line search. Since the line search usually doesn't
             backtrack, and usually only steps back once when it does, this
             hyperparameter doesn't often matter.
 
@@ -191,7 +234,7 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
         save_freq (int): How often (in terms of gap between epochs) to save
             the current policy and value function.
 
-        algo: Either 'trpo' or 'npg': this code supports both, since they are 
+        algo: Either 'trpo' or 'npg': this code supports both, since they are
             almost the same.
 
     """
@@ -206,42 +249,54 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
     env = env_fn()
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
-    
+
     # Share information about action space with policy architecture
-    ac_kwargs['action_space'] = env.action_space
+    ac_kwargs["action_space"] = env.action_space
 
     # Inputs to computation graph
-    x_ph, a_ph = core.placeholders_from_spaces(env.observation_space, env.action_space)
+    x_ph, a_ph = core.placeholders_from_spaces(
+        env.observation_space, env.action_space
+    )
     adv_ph, ret_ph, logp_old_ph = core.placeholders(None, None, None)
 
     # Main outputs from computation graph, plus placeholders for old pdist (for KL)
-    pi, logp, logp_pi, info, info_phs, d_kl, v = actor_critic(x_ph, a_ph, **ac_kwargs)
+    pi, logp, logp_pi, info, info_phs, d_kl, v = actor_critic(
+        x_ph, a_ph, **ac_kwargs
+    )
 
     # Need all placeholders in *this* order later (to zip with data from buffer)
-    all_phs = [x_ph, a_ph, adv_ph, ret_ph, logp_old_ph] + core.values_as_sorted_list(info_phs)
+    all_phs = [
+        x_ph,
+        a_ph,
+        adv_ph,
+        ret_ph,
+        logp_old_ph,
+    ] + core.values_as_sorted_list(info_phs)
 
     # Every step, get: action, value, logprob, & info for pdist (for computing kl div)
     get_action_ops = [pi, v, logp_pi] + core.values_as_sorted_list(info)
 
     # Experience buffer
     local_steps_per_epoch = int(steps_per_epoch / num_procs())
-    info_shapes = {k: v.shape.as_list()[1:] for k,v in info_phs.items()}
-    buf = GAEBuffer(obs_dim, act_dim, local_steps_per_epoch, info_shapes, gamma, lam)
+    info_shapes = {k: v.shape.as_list()[1:] for k, v in info_phs.items()}
+    buf = GAEBuffer(
+        obs_dim, act_dim, local_steps_per_epoch, info_shapes, gamma, lam
+    )
 
     # Count variables
-    var_counts = tuple(core.count_vars(scope) for scope in ['pi', 'v'])
-    logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n'%var_counts)
+    var_counts = tuple(core.count_vars(scope) for scope in ["pi", "v"])
+    logger.log("\nNumber of parameters: \t pi: %d, \t v: %d\n" % var_counts)
 
     # TRPO losses
-    ratio = tf.exp(logp - logp_old_ph)          # pi(a|s) / pi_old(a|s)
+    ratio = tf.exp(logp - logp_old_ph)  # pi(a|s) / pi_old(a|s)
     pi_loss = -tf.reduce_mean(ratio * adv_ph)
-    v_loss = tf.reduce_mean((ret_ph - v)**2)
+    v_loss = tf.reduce_mean((ret_ph - v) ** 2)
 
     # Optimizer for value function
     train_vf = MpiAdamOptimizer(learning_rate=vf_lr).minimize(v_loss)
 
     # Symbols needed for CG solver
-    pi_params = core.get_vars('pi')
+    pi_params = core.get_vars("pi")
     gradient = core.flat_grad(pi_loss, pi_params)
     v_ph, hvp = core.hessian_vector_product(d_kl, pi_params)
     if damping_coeff > 0:
@@ -258,7 +313,7 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
     sess.run(sync_all_params())
 
     # Setup model saving
-    logger.setup_tf_saver(sess, inputs={'x': x_ph}, outputs={'pi': pi, 'v': v})
+    logger.setup_tf_saver(sess, inputs={"x": x_ph}, outputs={"pi": pi, "v": v})
 
     def cg(Ax, b):
         """
@@ -266,52 +321,60 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
         (see https://en.wikipedia.org/wiki/Conjugate_gradient_method)
         """
         x = np.zeros_like(b)
-        r = b.copy() # Note: should be 'b - Ax(x)', but for x=0, Ax(x)=0. Change if doing warm start.
+        r = (
+            b.copy()
+        )  # Note: should be 'b - Ax(x)', but for x=0, Ax(x)=0. Change if doing warm start.
         p = r.copy()
-        r_dot_old = np.dot(r,r)
+        r_dot_old = np.dot(r, r)
         for _ in range(cg_iters):
             z = Ax(p)
             alpha = r_dot_old / (np.dot(p, z) + EPS)
             x += alpha * p
             r -= alpha * z
-            r_dot_new = np.dot(r,r)
+            r_dot_new = np.dot(r, r)
             p = r + (r_dot_new / r_dot_old) * p
             r_dot_old = r_dot_new
         return x
 
     def update():
         # Prepare hessian func, gradient eval
-        inputs = {k:v for k,v in zip(all_phs, buf.get())}
-        Hx = lambda x : mpi_avg(sess.run(hvp, feed_dict={**inputs, v_ph: x}))
-        g, pi_l_old, v_l_old = sess.run([gradient, pi_loss, v_loss], feed_dict=inputs)
+        inputs = {k: v for k, v in zip(all_phs, buf.get())}
+        Hx = lambda x: mpi_avg(sess.run(hvp, feed_dict={**inputs, v_ph: x}))
+        g, pi_l_old, v_l_old = sess.run(
+            [gradient, pi_loss, v_loss], feed_dict=inputs
+        )
         g, pi_l_old = mpi_avg(g), mpi_avg(pi_l_old)
 
         # Core calculations for TRPO or NPG
         x = cg(Hx, g)
-        alpha = np.sqrt(2*delta/(np.dot(x, Hx(x))+EPS))
+        alpha = np.sqrt(2 * delta / (np.dot(x, Hx(x)) + EPS))
         old_params = sess.run(get_pi_params)
 
         def set_and_eval(step):
-            sess.run(set_pi_params, feed_dict={v_ph: old_params - alpha * x * step})
+            sess.run(
+                set_pi_params, feed_dict={v_ph: old_params - alpha * x * step}
+            )
             return mpi_avg(sess.run([d_kl, pi_loss], feed_dict=inputs))
 
-        if algo=='npg':
+        if algo == "npg":
             # npg has no backtracking or hard kl constraint enforcement
-            kl, pi_l_new = set_and_eval(step=1.)
+            kl, pi_l_new = set_and_eval(step=1.0)
 
-        elif algo=='trpo':
+        elif algo == "trpo":
             # trpo augments npg with backtracking line search, hard kl
             for j in range(backtrack_iters):
                 kl, pi_l_new = set_and_eval(step=backtrack_coeff**j)
                 if kl <= delta and pi_l_new <= pi_l_old:
-                    logger.log('Accepting new params at step %d of line search.'%j)
+                    logger.log(
+                        "Accepting new params at step %d of line search." % j
+                    )
                     logger.store(BacktrackIters=j)
                     break
 
-                if j==backtrack_iters-1:
-                    logger.log('Line search failed! Keeping old params.')
+                if j == backtrack_iters - 1:
+                    logger.log("Line search failed! Keeping old params.")
                     logger.store(BacktrackIters=j)
-                    kl, pi_l_new = set_and_eval(step=0.)
+                    kl, pi_l_new = set_and_eval(step=0.0)
 
         # Value function updates
         for _ in range(train_v_iters):
@@ -319,9 +382,13 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
         v_l_new = sess.run(v_loss, feed_dict=inputs)
 
         # Log changes from update
-        logger.store(LossPi=pi_l_old, LossV=v_l_old, KL=kl,
-                     DeltaLossPi=(pi_l_new - pi_l_old),
-                     DeltaLossV=(v_l_new - v_l_old))
+        logger.store(
+            LossPi=pi_l_old,
+            LossV=v_l_old,
+            KL=kl,
+            DeltaLossPi=(pi_l_new - pi_l_old),
+            DeltaLossV=(v_l_new - v_l_old),
+        )
 
     start_time = time.time()
     o, ep_ret, ep_len = env.reset(), 0, 0
@@ -329,8 +396,15 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
     # Main loop: collect experience in env and update/log each epoch
     for epoch in range(epochs):
         for t in range(local_steps_per_epoch):
-            agent_outs = sess.run(get_action_ops, feed_dict={x_ph: o.reshape(1,-1)})
-            a, v_t, logp_t, info_t = agent_outs[0][0], agent_outs[1], agent_outs[2], agent_outs[3:]
+            agent_outs = sess.run(
+                get_action_ops, feed_dict={x_ph: o.reshape(1, -1)}
+            )
+            a, v_t, logp_t, info_t = (
+                agent_outs[0][0],
+                agent_outs[1],
+                agent_outs[2],
+                agent_outs[3:],
+            )
 
             o2, r, d, _ = env.step(a)
             ep_ret += r
@@ -344,11 +418,16 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
             o = o2
 
             terminal = d or (ep_len == max_ep_len)
-            if terminal or (t==local_steps_per_epoch-1):
-                if not(terminal):
-                    print('Warning: trajectory cut off by epoch at %d steps.'%ep_len)
+            if terminal or (t == local_steps_per_epoch - 1):
+                if not (terminal):
+                    print(
+                        "Warning: trajectory cut off by epoch at %d steps."
+                        % ep_len
+                    )
                 # if trajectory didn't reach terminal state, bootstrap value target
-                last_val = 0 if d else sess.run(v, feed_dict={x_ph: o.reshape(1,-1)})
+                last_val = (
+                    0 if d else sess.run(v, feed_dict={x_ph: o.reshape(1, -1)})
+                )
                 buf.finish_path(last_val)
                 if terminal:
                     # only save EpRet / EpLen if trajectory finished
@@ -356,48 +435,57 @@ def trpo(env_fn, actor_critic=core.mlp_actor_critic, ac_kwargs=dict(), seed=0,
                 o, ep_ret, ep_len = env.reset(), 0, 0
 
         # Save model
-        if (epoch % save_freq == 0) or (epoch == epochs-1):
-            logger.save_state({'env': env}, None)
+        if (epoch % save_freq == 0) or (epoch == epochs - 1):
+            logger.save_state({"env": env}, None)
 
         # Perform TRPO or NPG update!
         update()
 
         # Log info about epoch
-        logger.log_tabular('Epoch', epoch)
-        logger.log_tabular('EpRet', with_min_and_max=True)
-        logger.log_tabular('EpLen', average_only=True)
-        logger.log_tabular('VVals', with_min_and_max=True)
-        logger.log_tabular('TotalEnvInteracts', (epoch+1)*steps_per_epoch)
-        logger.log_tabular('LossPi', average_only=True)
-        logger.log_tabular('LossV', average_only=True)
-        logger.log_tabular('DeltaLossPi', average_only=True)
-        logger.log_tabular('DeltaLossV', average_only=True)
-        logger.log_tabular('KL', average_only=True)
-        if algo=='trpo':
-            logger.log_tabular('BacktrackIters', average_only=True)
-        logger.log_tabular('Time', time.time()-start_time)
+        logger.log_tabular("Epoch", epoch)
+        logger.log_tabular("EpRet", with_min_and_max=True)
+        logger.log_tabular("EpLen", average_only=True)
+        logger.log_tabular("VVals", with_min_and_max=True)
+        logger.log_tabular("TotalEnvInteracts", (epoch + 1) * steps_per_epoch)
+        logger.log_tabular("LossPi", average_only=True)
+        logger.log_tabular("LossV", average_only=True)
+        logger.log_tabular("DeltaLossPi", average_only=True)
+        logger.log_tabular("DeltaLossV", average_only=True)
+        logger.log_tabular("KL", average_only=True)
+        if algo == "trpo":
+            logger.log_tabular("BacktrackIters", average_only=True)
+        logger.log_tabular("Time", time.time() - start_time)
         logger.dump_tabular()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='HalfCheetah-v2')
-    parser.add_argument('--hid', type=int, default=64)
-    parser.add_argument('--l', type=int, default=2)
-    parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--seed', '-s', type=int, default=0)
-    parser.add_argument('--cpu', type=int, default=4)
-    parser.add_argument('--steps', type=int, default=4000)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--exp_name', type=str, default='trpo')
+    parser.add_argument("--env", type=str, default="HalfCheetah-v2")
+    parser.add_argument("--hid", type=int, default=64)
+    parser.add_argument("--l", type=int, default=2)
+    parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--seed", "-s", type=int, default=0)
+    parser.add_argument("--cpu", type=int, default=4)
+    parser.add_argument("--steps", type=int, default=4000)
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--exp_name", type=str, default="trpo")
     args = parser.parse_args()
 
     mpi_fork(args.cpu)  # run parallel code with mpi
 
     from spinup.utils.run_utils import setup_logger_kwargs
+
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
-    trpo(lambda : gym.make(args.env), actor_critic=core.mlp_actor_critic,
-         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), gamma=args.gamma, 
-         seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs,
-         logger_kwargs=logger_kwargs)
+    trpo(
+        lambda: gym.make(args.env),
+        actor_critic=core.mlp_actor_critic,
+        ac_kwargs=dict(hidden_sizes=[args.hid] * args.l),
+        gamma=args.gamma,
+        seed=args.seed,
+        steps_per_epoch=args.steps,
+        epochs=args.epochs,
+        logger_kwargs=logger_kwargs,
+    )
